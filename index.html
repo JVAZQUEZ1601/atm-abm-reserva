@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Listado de ATMs</title>
+  <style>
+    :root{
+      --azul:#007bff; --amarillo:#ffc107; --rojo:#dc3545;
+      --verde:#28a745; --gris:#6c757d; --fondo-modal:rgba(0,0,0,.55);
+    }
+    body{font-family:Arial, sans-serif;margin:2rem;background:#f9f9f9;}
+    h1,h2{text-align:center;margin-bottom:1rem;}
+    form{max-width:620px;margin:0 auto 2rem;padding:1.5rem;background:#fff;border-radius:8px;
+         box-shadow:0 2px 6px rgba(0,0,0,.1);}
+    label{display:block;margin-bottom:.5rem;font-weight:bold}
+    input,select,textarea{width:100%;padding:.6rem;margin-bottom:1rem;border:1px solid #ccc;
+         border-radius:4px}
+    input[readonly]{background:#e9ecef}
+    .acciones-form{display:flex;gap:.8rem}
+    button{padding:.6rem 1.2rem;border:none;border-radius:4px;cursor:pointer;font-weight:bold;color:#fff}
+    #submitBtn{background:var(--azul)}
+    #confirmDeleteBtn{background:var(--rojo)}
+    #confirmDeleteBtn:disabled{background:var(--gris);cursor:not-allowed}
+    table{width:100%;max-width:1000px;margin:2rem auto;border-collapse:collapse;background:#fff}
+    th,td{padding:.6rem .8rem;border:1px solid #ccc;text-align:left}
+    th{background:#e4e7eb}
+    tbody tr:nth-child(odd){background:#f5f7fa}
+    .tarjetas-container{display:flex;flex-wrap:wrap;gap:1rem;justify-content:center}
+    .tarjeta{background:#fff;border:1px solid #ddd;border-radius:8px;
+             padding:1rem 1rem 2.2rem;width:260px;box-shadow:0 2px 5px rgba(0,0,0,.1);position:relative}
+    .tarjeta img{width:100%;border-radius:8px;margin-bottom:10px}
+    .btn-card{position:absolute;padding:.3rem .6rem;font-size:.8rem;font-weight:bold;border:none;
+              border-radius:4px;cursor:pointer}
+    .editar-btn{top:8px;right:8px;background:var(--amarillo);color:#000}
+    .eliminar-btn{background:var(--rojo);color:#fff}
+    .el-card{bottom:8px;right:8px}
+    .estado-libre{color:var(--verde);font-weight:bold}
+    .estado-ocupado{color:var(--rojo);font-weight:bold}
+    #authModal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;
+               background:var(--fondo-modal);z-index:1000}
+    #authModal.active{display:flex}
+    .modal-content{background:#fff;padding:1.5rem 2rem;border-radius:8px;max-width:320px;width:100%;
+                   box-shadow:0 4px 10px rgba(0,0,0,.25);text-align:center}
+    .modal-content h3{margin-top:0}
+    .modal-content input{margin-bottom:.8rem}
+    .modal-actions{display:flex;gap:.6rem;justify-content:center}
+    .modal-btn{flex:1;padding:.5rem;border:none;border-radius:4px;font-weight:bold;color:#fff;
+               cursor:pointer}
+    #authOk{background:var(--azul)}
+    #authCancel{background:var(--gris)}
+    .error-msg{color:var(--rojo);font-size:.85rem;height:1.2rem;margin-bottom:.6rem}
+  </style>
+</head>
+<body>
+<h1>Reserva de ATMs</h1>
+<form id="registroForm">
+  <label>ID <input type="text" id="nombre" required></label>
+  <label>IP <input type="text" id="apellido" required></label>
+  <label>MARCA <input type="text" id="marca" required></label>
+  <label>MODELO <input type="text" id="modelo" required></label>
+  <label>SOFTWARE <input type="text" id="software" required></label>
+  <label>Reservado por <textarea id="reservadoPor" rows="4" required></textarea></label>
+  <label>Fecha hasta <input type="date" id="fechaHasta" required></label>
+  <label>Estado <input type="text" id="estado" readonly></label>
+  <label>Foto
+    <select id="imagen" required>
+      <option value="" disabled selected>Seleccionar imagen</option>
+      <option value="cajero.jpg">cajero.jpg</option>
+      <option value="cajero2.png">cajero1.png</option>
+    </select>
+  </label>
+  <div class="acciones-form">
+    <button type="submit" id="submitBtn">Guardar</button>
+    <button type="button" id="confirmDeleteBtn" disabled>ConfirmarDelete</button>
+  </div>
+</form>
+
+<h2>Listado de ATMs</h2>
+<table id="tablaHistorial">
+  <thead>
+    <tr>
+      <th>#</th><th>ID</th><th>IP</th><th>MARCA</th><th>MODELO</th><th>SOFTWARE</th>
+      <th>Reservado por</th><th>Fecha hasta</th><th>Estado</th><th>Acciones</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<h2>Tarjetas</h2>
+<div class="tarjetas-container" id="tarjetasContainer"></div>
+
+<!-- Modal de autenticación -->
+<div id="authModal">
+  <div class="modal-content">
+    <h3>Autenticación requerida</h3>
+    <input type="text" id="authUser" placeholder="Usuario">
+    <input type="password" id="authPass" placeholder="Contraseña">
+    <div class="error-msg" id="authError"></div>
+    <div class="modal-actions">
+      <button class="modal-btn" id="authOk">Acceder</button>
+      <button class="modal-btn" id="authCancel">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const STORAGE_KEY = 'registrosUsuario';
+let editIndex = null, deleteIndex = null, pendingIndex = null;
+
+const obtener = () => JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+const guardar = arr => localStorage.setItem(STORAGE_KEY, JSON.stringify(arr));
+
+const f = document.getElementById('registroForm');
+const tbody = document.querySelector('#tablaHistorial tbody');
+const cards = document.getElementById('tarjetasContainer');
+const fechaInp = document.getElementById('fechaHasta');
+const estadoInp = document.getElementById('estado');
+const submitBtn = document.getElementById('submitBtn');
+const confirmDelBtn = document.getElementById('confirmDeleteBtn');
+const modal = document.getElementById('authModal');
+const authUser = document.getElementById('authUser');
+const authPass = document.getElementById('authPass');
+const authOk = document.getElementById('authOk');
+const authCancel = document.getElementById('authCancel');
+const authError = document.getElementById('authError');
+
+const nombre = document.getElementById('nombre');
+const apellido = document.getElementById('apellido');
+const marcaInp = document.getElementById('marca');
+const modeloInp = document.getElementById('modelo');
+const softwareInp = document.getElementById('software');
+const reservadoPor = document.getElementById('reservadoPor');
+const imagen = document.getElementById('imagen');
+
+const calcEstado = fh => {
+  if (!fh) return { txt: '', cls: '' };
+  const hoy = new Date();
+  const fhd = new Date(fh + 'T00:00:00');
+  return fhd < hoy.setHours(0, 0, 0, 0)
+    ? { txt: 'LIBRE', cls: 'estado-libre' }
+    : { txt: 'OCUPADO', cls: 'estado-ocupado' };
+};
+
+fechaInp.addEventListener('change', () => {
+  estadoInp.value = calcEstado(fechaInp.value).txt;
+});
+
+f.addEventListener('submit', e => {
+  e.preventDefault();
+  const r = {
+    nombre: nombre.value.trim(),
+    apellido: apellido.value.trim(),
+    marca: marcaInp.value.trim(),
+    modelo: modeloInp.value.trim(),
+    software: softwareInp.value.trim(),
+    reservadoPor: reservadoPor.value.trim(),
+    fechaHasta: fechaInp.value,
+    imagen: imagen.value
+  };
+  r.estado = calcEstado(r.fechaHasta).txt;
+  const arr = obtener();
+  editIndex === null ? arr.push(r) : arr.splice(editIndex, 1, r);
+  guardar(arr);
+  resetForm();
+  render();
+});
+
+confirmDelBtn.addEventListener('click', () => {
+  if (deleteIndex === null) return;
+  const arr = obtener();
+  const { nombre, apellido } = arr[deleteIndex];
+  if (confirm(`¿Eliminar el registro de ${nombre} ${apellido}?`)) {
+    arr.splice(deleteIndex, 1);
+    guardar(arr);
+    resetForm();
+    render();
+  }
+});
+
+const render = () => {
+  renderTabla();
+  renderCards();
+};
+
+const renderTabla = () => {
+  const arr = obtener();
+  tbody.innerHTML = '';
+  arr.forEach((r, i) => {
+    const est = calcEstado(r.fechaHasta);
+    tbody.insertAdjacentHTML('beforeend', `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${r.nombre}</td>
+        <td>${r.apellido}</td>
+        <td>${r.marca}</td>
+        <td>${r.modelo}</td>
+        <td>${r.software}</td>
+        <td>${r.reservadoPor}</td>
+        <td>${r.fechaHasta}</td>
+        <td class="${est.cls}">${est.txt}</td>
+        <td><button class="eliminar-btn" data-del="${i}">Eliminar</button></td>
+      </tr>`);
+  });
+};
+
+const renderCards = () => {
+  const arr = obtener();
+  cards.innerHTML = '';
+  arr.forEach((r, i) => {
+    const est = calcEstado(r.fechaHasta);
+    cards.insertAdjacentHTML('beforeend', `
+      <div class="tarjeta">
+        <button class="btn-card editar-btn" data-edit="${i}">Editar</button>
+        <img src="imagenes/${r.imagen}" alt="Foto">
+        <p><strong>ID:</strong> ${r.nombre}</p>
+        <p><strong>IP:</strong> ${r.apellido}</p>
+        <p><strong>MARCA:</strong> ${r.marca}</p>
+        <p><strong>MODELO:</strong> ${r.modelo}</p>
+        <p><strong>SOFTWARE:</strong> ${r.software}</p>
+        <p><strong>Reservado por:</strong> ${r.reservadoPor}</p>
+        <p><strong>Fecha hasta:</strong> ${r.fechaHasta}</p>
+        <p><strong>Estado:</strong> <span class="${est.cls}">${est.txt}</span></p>
+        <button class="btn-card eliminar-btn el-card" data-del="${i}">Eliminar</button>
+      </div>`);
+  });
+};
+
+cards.addEventListener('click', e => {
+  if (e.target.dataset.edit !== undefined) cargar(e.target.dataset.edit, false);
+  else if (e.target.dataset.del !== undefined) autenticar(e.target.dataset.del);
+});
+tbody.addEventListener('click', e => {
+  if (e.target.dataset.del !== undefined) autenticar(e.target.dataset.del);
+});
+
+function showModal(idx) {
+  pendingIndex = idx;
+  modal.classList.add('active');
+  authUser.value = '';
+  authPass.value = '';
+  authError.textContent = '';
+  authUser.focus();
+}
+function hideModal() {
+  modal.classList.remove('active');
+}
+
+authOk.addEventListener('click', () => {
+  if (authUser.value === 'admin' && authPass.value === '1234') {
+    hideModal();
+    cargar(pendingIndex, true);
+    pendingIndex = null;
+  } else {
+    authError.textContent = 'Credenciales incorrectas';
+  }
+});
+authCancel.addEventListener('click', hideModal);
+modal.addEventListener('click', e => { if (e.target === modal) hideModal(); });
+
+const autenticar = idx => showModal(idx);
+
+const cargar = (i, modoEliminar) => {
+  const r = obtener()[i];
+  nombre.value = r.nombre;
+  apellido.value = r.apellido;
+  marcaInp.value = r.marca;
+  modeloInp.value = r.modelo;
+  softwareInp.value = r.software;
+  reservadoPor.value = r.reservadoPor;
+  fechaInp.value = r.fechaHasta;
+  estadoInp.value = calcEstado(r.fechaHasta).txt;
+  imagen.value = r.imagen;
+  editIndex = i;
+
+  if (modoEliminar) {
+    deleteIndex = i;
+    confirmDelBtn.disabled = false;
+  } else {
+    deleteIndex = null;
+    confirmDelBtn.disabled = true;
+  }
+  submitBtn.textContent = 'Actualizar';
+  f.scrollIntoView({ behavior: 'smooth' });
+};
+
+const resetForm = () => {
+  f.reset();
+  estadoInp.value = '';
+  editIndex = deleteIndex = null;
+  submitBtn.textContent = 'Guardar';
+  confirmDelBtn.disabled = true;
+};
+
+document.addEventListener('DOMContentLoaded', render);
+</script>
+</body>
+</html>
